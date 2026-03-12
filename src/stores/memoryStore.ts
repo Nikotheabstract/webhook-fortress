@@ -30,6 +30,14 @@ export class MemoryWebhookStore implements WebhookStore {
     this.locks.delete(eventId);
   }
 
+  async renewLock(eventId: string): Promise<boolean> {
+    return this.locks.has(eventId);
+  }
+
+  getLockTtlMs(): number | undefined {
+    return undefined;
+  }
+
   getFailures(): ReadonlyMap<string, unknown> {
     return new Map(this.failedEvents);
   }

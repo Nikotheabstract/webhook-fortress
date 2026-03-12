@@ -8,7 +8,7 @@ type StoreFactory = () => WebhookStore;
 
 class MockPostgresClient implements PostgresClient {
   private readonly processedEvents = new Set<string>();
-  private readonly lockTimestamps = new Map<string, number>();
+  private readonly locks = new Map<string, { lockedAt: number; token: string }>();
 
   async query(sql: string, params: unknown[] = []) {
     const normalized = sql.replace(/\s+/g, ' ').trim();
@@ -33,27 +33,50 @@ class MockPostgresClient implements PostgresClient {
 
     if (normalized.includes('ON CONFLICT (event_id) DO UPDATE') && normalized.includes('locked_at')) {
       const eventId = String(params[0] ?? '');
-      const lockTtlSeconds = Number(params[1] ?? 60);
+      const token = String(params[1] ?? '');
+      const lockTtlSeconds = Number(params[2] ?? 60);
       const current = Date.now();
-      const existingTimestamp = this.lockTimestamps.get(eventId);
+      const existing = this.locks.get(eventId);
 
-      if (existingTimestamp === undefined) {
-        this.lockTimestamps.set(eventId, current);
+      if (existing === undefined) {
+        this.locks.set(eventId, { lockedAt: current, token });
         return { rowCount: 1, rows: [{ event_id: eventId }] };
       }
 
       const ttlMs = lockTtlSeconds * 1000;
-      if (current - existingTimestamp > ttlMs) {
-        this.lockTimestamps.set(eventId, current);
+      if (current - existing.lockedAt > ttlMs) {
+        this.locks.set(eventId, { lockedAt: current, token });
         return { rowCount: 1, rows: [{ event_id: eventId }] };
       }
 
       return { rowCount: 0, rows: [] };
     }
 
-    if (normalized.startsWith('DELETE FROM')) {
+    if (
+      normalized.startsWith('UPDATE') &&
+      normalized.includes('SET locked_at = NOW()') &&
+      normalized.includes('lock_token = $2')
+    ) {
       const eventId = String(params[0] ?? '');
-      this.lockTimestamps.delete(eventId);
+      const token = String(params[1] ?? '');
+      const existing = this.locks.get(eventId);
+      if (!existing || existing.token !== token) {
+        return { rowCount: 0, rows: [] };
+      }
+
+      this.locks.set(eventId, { lockedAt: Date.now(), token });
+      return { rowCount: 1, rows: [{ event_id: eventId }] };
+    }
+
+    if (normalized.startsWith('DELETE FROM') && normalized.includes('lock_token = $2')) {
+      const eventId = String(params[0] ?? '');
+      const token = String(params[1] ?? '');
+      const existing = this.locks.get(eventId);
+      if (!existing || existing.token !== token) {
+        return { rowCount: 0, rows: [] };
+      }
+
+      this.locks.delete(eventId);
       return { rowCount: 1, rows: [] };
     }
 
@@ -99,18 +122,27 @@ class MockRedisClient implements RedisClient {
     return this.values.has(key) ? 1 : 0;
   }
 
-  async eval(_script: string, ...args: unknown[]): Promise<unknown> {
+  async eval(script: string, ...args: unknown[]): Promise<unknown> {
     const parsed = this.parseEvalArgs(args);
     if (!parsed) {
       return 0;
     }
 
     const current = await this.get(parsed.key);
-    if (current === parsed.token) {
-      return this.del(parsed.key);
+    if (current !== parsed.token) {
+      return 0;
     }
 
-    return 0;
+    if (script.includes('pexpire')) {
+      const ttlMs = this.parseEvalTtl(args);
+      if (typeof ttlMs === 'number' && ttlMs > 0) {
+        this.expiries.set(parsed.key, Date.now() + ttlMs);
+        return 1;
+      }
+      return 0;
+    }
+
+    return this.del(parsed.key);
   }
 
   private expireIfNeeded(key: string) {
@@ -177,6 +209,24 @@ class MockRedisClient implements RedisClient {
 
     return null;
   }
+
+  private parseEvalTtl(args: unknown[]): number | undefined {
+    if (typeof args[0] === 'number') {
+      const ttl = args[3];
+      const parsed = Number(ttl);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
+    const objectArgs = args[0];
+    if (objectArgs && typeof objectArgs === 'object') {
+      const parsedObject = objectArgs as { arguments?: unknown };
+      const ttl = Array.isArray(parsedObject.arguments) ? parsedObject.arguments[1] : undefined;
+      const parsed = Number(ttl);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
+    return undefined;
+  }
 }
 
 const runStoreContractSuite = (label: string, createStore: StoreFactory) => {
@@ -203,6 +253,22 @@ const runStoreContractSuite = (label: string, createStore: StoreFactory) => {
 
       await store.markProcessed('evt.process.1');
       expect(await store.hasProcessed('evt.process.1')).toBe(true);
+    });
+
+    it('renews held locks when lock renewal is supported', async () => {
+      const store = createStore();
+
+      expect(typeof store.renewLock).toBe('function');
+      if (typeof store.renewLock !== 'function') {
+        return;
+      }
+
+      expect(await store.acquireLock('evt.lock.renew.1')).toBe(true);
+      expect(await store.renewLock('evt.lock.renew.1')).toBe(true);
+
+      await store.releaseLock('evt.lock.renew.1');
+
+      expect(await store.renewLock('evt.lock.renew.1')).toBe(false);
     });
   });
 };

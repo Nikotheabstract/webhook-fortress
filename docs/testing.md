@@ -7,9 +7,9 @@ This guide describes how to run and extend the Webhook Fortress test suite.
 From repository root:
 
 ```bash
-cd backend
-npx tsc -p ../extractions/webhook-fortress/tsconfig.json --noEmit
-npx vitest run --config ../extractions/webhook-fortress/vitest.config.ts
+npm install
+npm run typecheck
+npm run test
 ```
 
 ## Current Test Coverage
@@ -20,6 +20,8 @@ The suite currently covers:
 - HTTP behavior (401/400/500 flows)
 - idempotency under duplicates and concurrency
 - failure handling and failure recording paths
+- lock renewal and lock release failure semantics
+- Postgres lock ownership token behavior (stale worker renew/release safety)
 - store adapter contract behavior for memory/postgres/redis
 - event ID fallback determinism
 

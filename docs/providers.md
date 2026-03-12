@@ -11,9 +11,27 @@ interface WebhookProvider {
 }
 ```
 
+Providers are registered in `createWebhookFortress` via a dynamic registry:
+
+```ts
+createWebhookFortress({
+  provider: "meta",
+  providers: {
+    meta: new MetaWebhookProvider({ secret: process.env.META_APP_SECRET })
+  },
+  handler: async (event) => {
+    // domain logic
+  }
+})
+```
+
+`provider: "meta"` remains the default for backward compatibility.
+
 ## Provider Boundary
 
 Providers are responsible for protocol correctness, not business execution.
+
+HTTP request orchestration (status codes, handler invocation, idempotency flow) lives in the factory layer.
 
 Providers should:
 

@@ -149,6 +149,8 @@ export class MetaWebhookProvider implements WebhookProvider {
   }
 
   async handleRequest(req: Request, res: Response) {
+    // Backward-compatible convenience wrapper.
+    // Prefer createWebhookFortress(...).handleRequest for orchestration.
     if (!this.verifySignature(req)) {
       return res.sendStatus(401);
     }

@@ -11,8 +11,12 @@ interface WebhookStore {
   recordFailure(eventId: string, error?: unknown): Promise<void>
   acquireLock(eventId: string): Promise<boolean>
   releaseLock(eventId: string): Promise<void>
+  renewLock?(eventId: string): Promise<boolean>
+  getLockTtlMs?(): number | undefined
 }
 ```
+
+`renewLock`/`getLockTtlMs` are optional capabilities used by the event processor to keep TTL-based locks alive during long-running handlers.
 
 ## Built-in Adapters
 
@@ -31,6 +35,12 @@ Best for local development and tests. State is process-local and non-durable.
 ### `postgresStore({ client })`
 
 Best when you want durable processed/failure records and SQL-backed operational visibility.
+
+Lock ownership is tokenized per event lock:
+
+- lock rows store `event_id`, `lock_token`, `locked_at`
+- renew/release operations require both `event_id` and matching `lock_token`
+- stale workers cannot release or renew newly acquired locks
 
 ### `redisStore({ client })`
 
@@ -52,3 +62,4 @@ Requirements:
 - lock acquisition must prevent concurrent execution for the same event ID
 - `markProcessed` must be durable enough for your reliability requirements
 - `recordFailure` must not mark the event as processed
+- if lock TTL is used, renewal/release should be ownership-safe

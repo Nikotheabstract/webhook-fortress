@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { WebhookStore } from './WebhookStore.js';
 
 type QueryResult<Row = unknown> = {
@@ -59,6 +60,7 @@ export class PostgresWebhookStore implements WebhookStore {
   private readonly locksTable: string;
   private readonly failuresTable: string;
   private readonly lockTtlSeconds: number;
+  private readonly ownedLockTokens = new Map<string, string>();
 
   constructor(config: PostgresStoreConfig) {
     this.client = config.client;
@@ -101,21 +103,68 @@ export class PostgresWebhookStore implements WebhookStore {
   }
 
   async acquireLock(eventId: string): Promise<boolean> {
+    const token = randomUUID();
     const result = await this.client.query(
-      `INSERT INTO ${this.locksTable} (event_id, locked_at)
-       VALUES ($1, NOW())
+      `INSERT INTO ${this.locksTable} (event_id, lock_token, locked_at)
+       VALUES ($1, $2, NOW())
        ON CONFLICT (event_id) DO UPDATE
-       SET locked_at = NOW()
-       WHERE ${this.locksTable}.locked_at < NOW() - ($2 * INTERVAL '1 second')
+       SET lock_token = EXCLUDED.lock_token,
+           locked_at = NOW()
+       WHERE ${this.locksTable}.locked_at < NOW() - ($3 * INTERVAL '1 second')
        RETURNING event_id`,
-      [eventId, this.lockTtlSeconds]
+      [eventId, token, this.lockTtlSeconds]
+    );
+
+    const acquired = hasRows(result);
+    if (acquired) {
+      this.ownedLockTokens.set(eventId, token);
+    }
+
+    return acquired;
+  }
+
+  async releaseLock(eventId: string): Promise<void> {
+    const token = this.ownedLockTokens.get(eventId);
+    if (!token) {
+      return;
+    }
+
+    try {
+      const result = await this.client.query(
+        `DELETE FROM ${this.locksTable}
+         WHERE event_id = $1
+           AND lock_token = $2`,
+        [eventId, token]
+      );
+
+      if (!hasRows(result)) {
+        throw new Error(`Lost lock ownership for event ${eventId}`);
+      }
+    } finally {
+      this.ownedLockTokens.delete(eventId);
+    }
+  }
+
+  async renewLock(eventId: string): Promise<boolean> {
+    const token = this.ownedLockTokens.get(eventId);
+    if (!token) {
+      return false;
+    }
+
+    const result = await this.client.query(
+      `UPDATE ${this.locksTable}
+       SET locked_at = NOW()
+       WHERE event_id = $1
+         AND lock_token = $2
+       RETURNING event_id`,
+      [eventId, token]
     );
 
     return hasRows(result);
   }
 
-  async releaseLock(eventId: string): Promise<void> {
-    await this.client.query(`DELETE FROM ${this.locksTable} WHERE event_id = $1`, [eventId]);
+  getLockTtlMs(): number {
+    return this.lockTtlSeconds * 1_000;
   }
 }
 

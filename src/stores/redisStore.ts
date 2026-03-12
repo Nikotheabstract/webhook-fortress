@@ -71,6 +71,14 @@ else
 end
 `;
 
+const renewScript = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('pexpire', KEYS[1], ARGV[2])
+else
+  return 0
+end
+`;
+
 export class RedisWebhookStore implements WebhookStore {
   private readonly client: RedisClient;
   private readonly keyPrefix: string;
@@ -171,6 +179,49 @@ export class RedisWebhookStore implements WebhookStore {
     } finally {
       this.ownedLockTokens.delete(eventId);
     }
+  }
+
+  async renewLock(eventId: string): Promise<boolean> {
+    const key = this.getLockKey(eventId);
+    const token = this.ownedLockTokens.get(eventId);
+
+    if (!token) {
+      return false;
+    }
+
+    if (typeof this.client.eval === 'function') {
+      try {
+        const result = await this.client.eval(renewScript, 1, key, token, String(this.lockTtlMs));
+        return isRedisOk(result);
+      } catch {
+        try {
+          const result = await this.client.eval(renewScript, {
+            keys: [key],
+            arguments: [token, String(this.lockTtlMs)],
+          });
+          return isRedisOk(result);
+        } catch {
+          return false;
+        }
+      }
+    }
+
+    const current = await this.client.get(key);
+    if (current !== token) {
+      return false;
+    }
+
+    try {
+      const result = await this.client.set(key, token, { XX: true, PX: this.lockTtlMs });
+      return isRedisOk(result);
+    } catch {
+      const result = await this.client.set(key, token, 'PX', this.lockTtlMs, 'XX');
+      return isRedisOk(result);
+    }
+  }
+
+  getLockTtlMs(): number {
+    return this.lockTtlMs;
   }
 
   private getProcessedKey(eventId: string): string {

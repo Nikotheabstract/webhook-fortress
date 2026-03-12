@@ -8,7 +8,9 @@ export type EventProcessResult = {
   processed: boolean;
 };
 
-export type EventProcessorOptions = LockingOptions;
+export type EventProcessorOptions = LockingOptions & {
+  onDuplicate?: (eventId: string) => void;
+};
 
 export class EventProcessor {
   private readonly store: WebhookStore;
@@ -26,6 +28,7 @@ export class EventProcessor {
     }
 
     if (await hasEventBeenProcessed(this.store, normalizedEventId)) {
+      this.emitDuplicate(normalizedEventId);
       return { processed: false };
     }
 
@@ -35,6 +38,7 @@ export class EventProcessor {
         normalizedEventId,
         async () => {
           if (await hasEventBeenProcessed(this.store, normalizedEventId)) {
+            this.emitDuplicate(normalizedEventId);
             return { processed: false };
           }
 
@@ -56,10 +60,23 @@ export class EventProcessor {
       );
     } catch (error) {
       if (await hasEventBeenProcessed(this.store, normalizedEventId)) {
+        this.emitDuplicate(normalizedEventId);
         return { processed: false };
       }
 
       throw error;
+    }
+  }
+
+  private emitDuplicate(eventId: string): void {
+    if (typeof this.options.onDuplicate !== 'function') {
+      return;
+    }
+
+    try {
+      this.options.onDuplicate(eventId);
+    } catch {
+      // Hooks are observational and must never alter processor control flow.
     }
   }
 }

@@ -4,4 +4,6 @@ export interface WebhookStore {
   recordFailure(eventId: string, error?: unknown): Promise<void>;
   acquireLock(eventId: string): Promise<boolean>;
   releaseLock(eventId: string): Promise<void>;
+  renewLock?: (eventId: string) => Promise<boolean>;
+  getLockTtlMs?: () => number | undefined;
 }
