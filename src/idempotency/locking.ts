@@ -1,7 +1,18 @@
 import type { WebhookStore } from '../stores/WebhookStore.js';
+import {
+  calculateBackoffDelay,
+  DEFAULT_BACKOFF_BASE_DELAY_MS,
+  DEFAULT_BACKOFF_CAP_DELAY_MS,
+  sleep,
+} from '../utils/backoff.js';
 
 export type LockingOptions = {
+  /**
+   * @deprecated Use retryBaseDelayMs.
+   */
   retryIntervalMs?: number;
+  retryBaseDelayMs?: number;
+  retryMaxDelayMs?: number;
   acquireTimeoutMs?: number;
   onLockContention?: (eventId: string) => void;
   onWarning?: (warning: LockWarning) => void;
@@ -19,13 +30,7 @@ export type LockWarning = {
   error?: unknown;
 };
 
-const DEFAULT_RETRY_INTERVAL_MS = 25;
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 10_000;
-
-const sleep = async (ms: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
 
 type RenewingStore = WebhookStore & {
   renewLock: (eventId: string) => Promise<boolean>;
@@ -66,7 +71,7 @@ const emitWarningSafely = (warning: LockWarning, hook?: (warning: LockWarning) =
 const resolveRenewIntervalMs = (
   store: RenewingStore,
   options: LockingOptions,
-  retryIntervalMs: number
+  retryBaseDelayMs: number
 ): number | undefined => {
   if (typeof options.lockRenewIntervalMs === 'number' && options.lockRenewIntervalMs > 0) {
     return Math.max(1, options.lockRenewIntervalMs);
@@ -75,7 +80,7 @@ const resolveRenewIntervalMs = (
   if (typeof store.getLockTtlMs === 'function') {
     const lockTtlMs = store.getLockTtlMs();
     if (typeof lockTtlMs === 'number' && lockTtlMs > 0) {
-      return Math.max(retryIntervalMs, Math.floor(lockTtlMs / 2));
+      return Math.max(retryBaseDelayMs, Math.floor(lockTtlMs / 2));
     }
   }
 
@@ -160,10 +165,18 @@ export async function withEventLock<T>(
   operation: () => Promise<T>,
   options: LockingOptions = {}
 ): Promise<T> {
-  const retryIntervalMs = Math.max(1, options.retryIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS);
-  const acquireTimeoutMs = Math.max(retryIntervalMs, options.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS);
+  const retryBaseDelayMs = Math.max(
+    1,
+    options.retryBaseDelayMs ?? options.retryIntervalMs ?? DEFAULT_BACKOFF_BASE_DELAY_MS
+  );
+  const retryMaxDelayMs = Math.max(
+    retryBaseDelayMs,
+    options.retryMaxDelayMs ?? DEFAULT_BACKOFF_CAP_DELAY_MS
+  );
+  const acquireTimeoutMs = Math.max(retryBaseDelayMs, options.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS);
   const startedAt = Date.now();
   let contentionHookCalled = false;
+  let attempt = 0;
 
   while (true) {
     const acquired = await store.acquireLock(eventId);
@@ -188,7 +201,18 @@ export async function withEventLock<T>(
       throw new Error(`Failed to acquire lock for event ${eventId}`);
     }
 
-    await sleep(retryIntervalMs);
+    const delayMs = calculateBackoffDelay(attempt, {
+      baseDelayMs: retryBaseDelayMs,
+      capDelayMs: retryMaxDelayMs,
+    });
+    attempt += 1;
+
+    const remainingMs = acquireTimeoutMs - elapsedMs;
+    if (remainingMs <= 0) {
+      throw new Error(`Failed to acquire lock for event ${eventId}`);
+    }
+
+    await sleep(Math.min(delayMs, remainingMs));
   }
 
   const renewal =
@@ -196,7 +220,7 @@ export async function withEventLock<T>(
       ? startLockRenewal(
           store,
           eventId,
-          resolveRenewIntervalMs(store, options, retryIntervalMs),
+          resolveRenewIntervalMs(store, options, retryBaseDelayMs),
           options.onLockContention,
           options.onWarning
         )

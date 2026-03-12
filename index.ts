@@ -9,6 +9,10 @@ import {
   type MetaWebhookProviderConfig,
   type WebhookEventHandlerFn,
 } from './src/providers/meta/MetaWebhookProvider.js';
+import {
+  resolveWebhookToleranceSeconds,
+  verifyRequestFreshness,
+} from './src/providers/meta/metaSignature.js';
 
 export type WebhookFortressConfig = {
   provider?: string;
@@ -56,6 +60,53 @@ type FailureReadableStore = WebhookStore & {
 
 const hasFailureReader = (store: WebhookStore): store is FailureReadableStore =>
   typeof (store as { getFailures?: unknown }).getFailures === 'function';
+
+const coerceHeaderValue = (value: unknown): string | string[] | undefined => {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) {
+    return value;
+  }
+
+  return undefined;
+};
+
+const readHeader = (req: Request, headerName: string): string | string[] | undefined => {
+  const normalizedName = headerName.toLowerCase();
+  const fromHeaders = coerceHeaderValue(req.headers[normalizedName]);
+  if (fromHeaders) {
+    return fromHeaders;
+  }
+
+  if (typeof req.header === 'function') {
+    return coerceHeaderValue(req.header(headerName));
+  }
+
+  return undefined;
+};
+
+const readTimestampHeader = (req: Request): string | string[] | undefined => {
+  const headerNames = [
+    'x-webhook-timestamp',
+    'x-hub-timestamp',
+    'x-request-timestamp',
+    'x-timestamp',
+  ] as const;
+
+  for (const headerName of headerNames) {
+    const value = readHeader(req, headerName);
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+};
+
+const readSignatureHeader = (req: Request): string | string[] | undefined =>
+  readHeader(req, 'x-hub-signature-256') ?? readHeader(req, 'x-hub-signature');
 
 const invokeHookSafely = <TArgs extends unknown[]>(
   hook: ((...args: TArgs) => unknown) | undefined,
@@ -169,7 +220,24 @@ export function createWebhookFortress(config: WebhookFortressConfig = {}): Webho
     providers,
     process,
     handleRequest: async (req, res) => {
+      const signatureHeader = readSignatureHeader(req);
       if (!activeProvider.verifySignature(req)) {
+        return res.sendStatus(401);
+      }
+
+      const freshness = verifyRequestFreshness({
+        signatureHeader,
+        timestampHeader: readTimestampHeader(req),
+        rawBody: Buffer.isBuffer(req.body) ? req.body : undefined,
+        toleranceSeconds: resolveWebhookToleranceSeconds(),
+      });
+      if (!freshness.ok) {
+        // Security logging: stale/future requests are rejected before event processing.
+        console.warn('[Webhook Fortress] Webhook rejected: timestamp outside allowed tolerance', {
+          ageSeconds: freshness.ageSeconds,
+          toleranceSeconds: freshness.toleranceSeconds,
+          requestTimestampSeconds: freshness.requestTimestampSeconds,
+        });
         return res.sendStatus(401);
       }
 

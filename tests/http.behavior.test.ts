@@ -101,4 +101,34 @@ describe('Webhook Fortress HTTP behavior', () => {
     expect(res.sendStatus).toHaveBeenCalledWith(500);
     expect(handler).toHaveBeenCalledTimes(1);
   });
+
+  it('returns 401 when webhook timestamp is outside tolerance window', async () => {
+    const handler = vi.fn(async () => undefined);
+    const webhook = createWebhookFortress({
+      provider: 'meta',
+      secret: 'meta-secret',
+      handler,
+    });
+
+    const staleTimestampSeconds = Math.floor(Date.now() / 1_000) - 1_000;
+    const req = createRequest(
+      {
+        object: 'page',
+        entry: [
+          {
+            id: 'page-1',
+            time: staleTimestampSeconds,
+            messaging: [{ message: { mid: 'mid.stale.401' } }],
+          },
+        ],
+      },
+      'meta-secret'
+    );
+    const res = createResponse();
+
+    await webhook.handleRequest(req, res);
+
+    expect(res.sendStatus).toHaveBeenCalledWith(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

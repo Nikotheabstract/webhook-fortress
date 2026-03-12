@@ -1,17 +1,21 @@
 import { createHash } from 'crypto';
+import { ZodError } from 'zod';
 import type { WebhookEventHandler } from '../../handlers/WebhookEventHandler.js';
 import type { Request, Response, WebhookEvent } from '../../types.js';
 import type { WebhookProvider } from '../WebhookProvider.js';
 import type {
   MetaChannel,
-  MetaChange,
-  MetaEntry,
-  MetaMessagingEvent,
-  MetaWebhookPayload,
 } from './metaEventParser.js';
 import { resolveChannel } from './metaEventParser.js';
 import type { WebhookSecretCandidate } from './metaSignature.js';
 import { verifyWebhookSignature } from './metaSignature.js';
+import type {
+  MetaChange,
+  MetaEntry,
+  MetaMessagingEvent,
+  MetaWebhookNotificationPayload,
+} from '../../schemas/metaWebhookSchemas.js';
+import { MetaWebhookNotificationSchema } from '../../schemas/metaWebhookSchemas.js';
 
 export type WebhookEventHandlerFn = (event: WebhookEvent) => Promise<void> | void;
 
@@ -87,6 +91,18 @@ const resolveEventId = (
   return `meta:${channel}:${payloadDigest}`;
 };
 
+const logValidationError = (error: unknown) => {
+  if (error instanceof ZodError) {
+    // Security logging: capture schema issues without logging full raw payload content.
+    console.error('[Webhook Fortress] Meta webhook validation failed', {
+      issues: error.issues,
+    });
+    return;
+  }
+
+  console.error('[Webhook Fortress] Meta webhook payload parse failed', error);
+};
+
 export class MetaWebhookProvider implements WebhookProvider {
   private readonly config: MetaWebhookProviderConfig;
   private readonly handler: WebhookEventHandler;
@@ -113,11 +129,19 @@ export class MetaWebhookProvider implements WebhookProvider {
       throw new Error('Missing raw body');
     }
 
-    let payload: MetaWebhookPayload;
+    let payloadCandidate: unknown;
     try {
-      payload = JSON.parse(rawBody.toString('utf8')) as MetaWebhookPayload;
+      payloadCandidate = JSON.parse(rawBody.toString('utf8'));
     } catch {
       throw new Error('Invalid JSON payload');
+    }
+
+    let payload: MetaWebhookNotificationPayload;
+    try {
+      payload = MetaWebhookNotificationSchema.parse(payloadCandidate);
+    } catch (error) {
+      logValidationError(error);
+      throw new Error('Invalid webhook payload');
     }
 
     const channel = this.config.forcedChannel ?? resolveChannel(payload);
