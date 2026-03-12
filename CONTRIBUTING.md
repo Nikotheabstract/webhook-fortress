@@ -11,16 +11,19 @@ Thanks for contributing to Webhook Fortress.
 
 ## Development Setup
 
-Install dependencies from the monorepo root/backend as needed, then run tests from `backend` with the extraction Vitest config.
+From the standalone repository root:
+
+```bash
+npm install
+```
 
 ## Run Tests
 
 From repository root:
 
 ```bash
-cd backend
-npx tsc -p ../extractions/webhook-fortress/tsconfig.json --noEmit
-npx vitest run --config ../extractions/webhook-fortress/vitest.config.ts
+npm run typecheck
+npm run test
 ```
 
 ## Adding Providers
@@ -58,4 +61,4 @@ npx vitest run --config ../extractions/webhook-fortress/vitest.config.ts
 
 - Include rationale and behavior impact summary.
 - Include test coverage for new logic.
-- Confirm all extraction tests and type checks pass.
+- Confirm all tests and type checks pass.
