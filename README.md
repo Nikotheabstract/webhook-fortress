@@ -88,6 +88,16 @@ app.post(
 > Signature verification depends on the exact raw request body bytes.  
 > For Express integrations, use `express.raw({ type: "application/json" })` on the webhook route.
 
+## Security Model
+
+Webhook Fortress applies three security boundaries before handler execution:
+
+- **HMAC verification**: Meta signatures are validated with HMAC-SHA256 over raw bytes and compared using `timingSafeEqual`.
+- **Contract-first payload validation**: Meta notification payloads are parsed with Zod schemas before normalization.
+- **Replay-window enforcement**: Meta requests are rejected with `401` when the request timestamp is stale, too far in the future, or missing.
+
+Freshness tolerance is controlled by `WEBHOOK_TOLERANCE_SECONDS` (default: `300` seconds).
+
 Example with explicit Postgres-backed idempotency state:
 
 ```ts

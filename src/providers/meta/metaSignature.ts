@@ -176,7 +176,9 @@ export type RequestFreshnessInput = {
   toleranceSeconds?: number;
 };
 
-export const resolveWebhookToleranceSeconds = (value = process.env.WEBHOOK_TOLERANCE_SECONDS): number => {
+export const resolveWebhookToleranceSeconds = (
+  value: string | number | undefined = process.env.WEBHOOK_TOLERANCE_SECONDS
+): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return DEFAULT_WEBHOOK_TOLERANCE_SECONDS;

@@ -22,6 +22,7 @@ The suite currently covers:
 - failure handling and failure recording paths
 - lock renewal and lock release failure semantics
 - Postgres lock ownership token behavior (stale worker renew/release safety)
+- request freshness/replay-window rejection behavior
 - store adapter contract behavior for memory/postgres/redis
 - event ID fallback determinism
 

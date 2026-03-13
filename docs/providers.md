@@ -8,6 +8,7 @@ Providers isolate source-specific webhook behavior from the core engine.
 interface WebhookProvider {
   verifySignature(req: Request): boolean
   parseEvent(req: Request): WebhookEvent
+  verifyFreshness?(req: Request): { ok: boolean; reason: string }
 }
 ```
 
@@ -36,6 +37,7 @@ HTTP request orchestration (status codes, handler invocation, idempotency flow) 
 Providers should:
 
 - verify signatures against raw body data
+- enforce provider-specific request freshness (recommended for replay defense)
 - parse source payloads
 - normalize into `WebhookEvent`
 - generate deterministic event IDs
@@ -50,6 +52,7 @@ Providers should not:
 ## Provider Checklist
 
 - Verify raw-body signature correctly.
+- Verify request freshness policy (timestamp tolerance or equivalent).
 - Normalize events consistently.
 - Generate deterministic event IDs.
 - Avoid domain side effects.
@@ -62,9 +65,11 @@ Providers should not:
 
 1. Create `src/providers/<provider>/MyProvider.ts`.
 2. Implement `verifySignature(req)`.
-3. Implement `parseEvent(req)` returning normalized `WebhookEvent`.
-4. Add provider registration in `createWebhookFortress()`.
-5. Add tests for:
+3. Optionally implement `verifyFreshness(req)` for replay-window protection.
+4. Implement `parseEvent(req)` returning normalized `WebhookEvent`.
+5. Add provider registration in `createWebhookFortress()`.
+6. Add tests for:
    - signature validation
+   - freshness/replay checks
    - parsing/normalization
    - deterministic event IDs and fallback behavior

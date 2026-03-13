@@ -30,6 +30,14 @@ On handler failure:
 
 This keeps failed events retryable.
 
+## Replay Protection
+
+Meta provider freshness checks reject requests when timestamp age is outside tolerance or when no timestamp signal is present.
+
+- Configure tolerance via `WEBHOOK_TOLERANCE_SECONDS` (default `300`).
+- Rejected requests return `401` before event processing.
+- If your provider model differs, implement provider-specific `verifyFreshness(req)`.
+
 ## Monitoring Suggestions
 
 Track at minimum:

@@ -41,15 +41,16 @@ Detailed flow:
 
 1. HTTP request arrives with raw body.
 2. Provider verifies signature.
-3. Provider parses payload into `WebhookEvent`.
-4. EventProcessor checks `hasProcessed(eventId)`.
-5. EventProcessor acquires lock for `eventId`.
-6. EventProcessor starts lock renewal heartbeat (for stores that support renewal).
-7. EventProcessor re-checks `hasProcessed(eventId)` after lock.
-8. Handler runs once.
-9. On success: `markProcessed(eventId)`.
-10. On failure: `recordFailure(eventId, error)` and propagate error.
-11. Lock renewal stops and lock is released.
+3. Provider freshness policy checks replay window.
+4. Provider parses payload into `WebhookEvent`.
+5. EventProcessor checks `hasProcessed(eventId)`.
+6. EventProcessor acquires lock for `eventId`.
+7. EventProcessor starts lock renewal heartbeat (for stores that support renewal).
+8. EventProcessor re-checks `hasProcessed(eventId)` after lock.
+9. Handler runs once.
+10. On success: `markProcessed(eventId)`.
+11. On failure: `recordFailure(eventId, error)` and propagate error.
+12. Lock renewal stops and lock is released.
 
 ## Reliability Boundaries
 

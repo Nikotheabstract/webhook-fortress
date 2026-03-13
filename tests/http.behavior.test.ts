@@ -2,8 +2,44 @@ import { createHmac } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { createWebhookFortress } from '../index.js';
 
-const signPayload = (payload: unknown, secret: string) => {
-  const raw = JSON.stringify(payload);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const withFreshEntryTimestamp = (payload: unknown): unknown => {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+
+  const entries = Array.isArray(payload.entry) ? payload.entry : null;
+  if (!entries) {
+    return payload;
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1_000);
+  const normalizedEntries = entries.map((entry) => {
+    if (!isRecord(entry)) {
+      return entry;
+    }
+
+    if (typeof entry.time === 'number') {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      time: nowSeconds,
+    };
+  });
+
+  return {
+    ...payload,
+    entry: normalizedEntries,
+  };
+};
+
+const signPayload = (payload: unknown, secret: string, options?: { preservePayloadTimestamp?: boolean }) => {
+  const normalizedPayload = options?.preservePayloadTimestamp ? payload : withFreshEntryTimestamp(payload);
+  const raw = JSON.stringify(normalizedPayload);
   const signature = createHmac('sha256', secret).update(raw).digest('hex');
 
   return {
@@ -12,8 +48,14 @@ const signPayload = (payload: unknown, secret: string) => {
   };
 };
 
-const createRequest = (payload: unknown, secret: string, options?: { signatureOverride?: string }) => {
-  const { raw, signatureHeader } = signPayload(payload, secret);
+const createRequest = (
+  payload: unknown,
+  secret: string,
+  options?: { signatureOverride?: string; preservePayloadTimestamp?: boolean }
+) => {
+  const { raw, signatureHeader } = signPayload(payload, secret, {
+    preservePayloadTimestamp: options?.preservePayloadTimestamp,
+  });
   const resolvedSignature = options?.signatureOverride ?? signatureHeader;
 
   return {
@@ -123,6 +165,30 @@ describe('Webhook Fortress HTTP behavior', () => {
         ],
       },
       'meta-secret'
+    );
+    const res = createResponse();
+
+    await webhook.handleRequest(req, res);
+
+    expect(res.sendStatus).toHaveBeenCalledWith(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when request has no timestamp signal for replay protection', async () => {
+    const handler = vi.fn(async () => undefined);
+    const webhook = createWebhookFortress({
+      provider: 'meta',
+      secret: 'meta-secret',
+      handler,
+    });
+
+    const req = createRequest(
+      {
+        object: 'page',
+        entry: [{ id: 'page-1', messaging: [{ message: { mid: 'mid.no.timestamp.401' } }] }],
+      },
+      'meta-secret',
+      { preservePayloadTimestamp: true }
     );
     const res = createResponse();
 

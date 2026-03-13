@@ -38,4 +38,37 @@ describe('provider registry', () => {
     const webhooks = createWebhookFortress({ provider: 'meta' });
     expect(() => webhooks.getProvider('meta')).not.toThrow();
   });
+
+  it('applies provider-specific freshness policy when provider implements it', async () => {
+    const handler = vi.fn(async () => undefined);
+    const customProvider = {
+      verifySignature: (_req: Request) => true,
+      parseEvent: (_req: Request) =>
+        ({
+          id: 'custom.stale.1',
+          provider: 'custom',
+          type: 'custom.event',
+          payload: {},
+          receivedAt: new Date(),
+        }) satisfies WebhookEvent,
+      verifyFreshness: () => ({
+        ok: false as const,
+        reason: 'custom-stale',
+      }),
+    };
+
+    const webhooks = createWebhookFortress({
+      provider: 'custom',
+      providers: {
+        custom: customProvider,
+      },
+      handler,
+    });
+
+    const res = { sendStatus: vi.fn((statusCode: number) => statusCode) };
+    await webhooks.handleRequest({ headers: {}, body: Buffer.from('{}') }, res);
+
+    expect(res.sendStatus).toHaveBeenCalledWith(401);
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

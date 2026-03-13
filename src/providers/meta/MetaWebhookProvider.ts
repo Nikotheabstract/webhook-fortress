@@ -2,13 +2,17 @@ import { createHash } from 'crypto';
 import { ZodError } from 'zod';
 import type { WebhookEventHandler } from '../../handlers/WebhookEventHandler.js';
 import type { Request, Response, WebhookEvent } from '../../types.js';
-import type { WebhookProvider } from '../WebhookProvider.js';
+import type { WebhookFreshnessCheckResult, WebhookProvider } from '../WebhookProvider.js';
 import type {
   MetaChannel,
 } from './metaEventParser.js';
 import { resolveChannel } from './metaEventParser.js';
 import type { WebhookSecretCandidate } from './metaSignature.js';
-import { verifyWebhookSignature } from './metaSignature.js';
+import {
+  resolveWebhookToleranceSeconds,
+  verifyRequestFreshness,
+  verifyWebhookSignature,
+} from './metaSignature.js';
 import type {
   MetaChange,
   MetaEntry,
@@ -34,6 +38,11 @@ export type MetaWebhookProviderConfig = {
   secret?: string;
   instagramSecret?: string;
   forcedChannel?: MetaChannel;
+  webhookToleranceSeconds?: number;
+  /**
+   * @deprecated Keeping this true weakens replay protection.
+   */
+  allowMissingTimestamp?: boolean;
   handler?: WebhookEventHandler | WebhookEventHandlerFn;
 };
 
@@ -123,6 +132,43 @@ export class MetaWebhookProvider implements WebhookProvider {
     return check.ok;
   }
 
+  verifyFreshness(req: Request): WebhookFreshnessCheckResult {
+    const rawBody = Buffer.isBuffer(req.body) ? req.body : undefined;
+    const freshness = verifyRequestFreshness({
+      signatureHeader: this.readSignatureHeader(req),
+      timestampHeader: this.readTimestampHeader(req),
+      rawBody,
+      toleranceSeconds: resolveWebhookToleranceSeconds(this.config.webhookToleranceSeconds),
+    });
+
+    if (!freshness.ok) {
+      return {
+        ok: false,
+        reason: freshness.reason,
+        details: {
+          requestTimestampSeconds: freshness.requestTimestampSeconds,
+          ageSeconds: freshness.ageSeconds,
+          toleranceSeconds: freshness.toleranceSeconds,
+        },
+      };
+    }
+
+    if (freshness.reason === 'timestamp_unavailable' && !this.config.allowMissingTimestamp) {
+      return {
+        ok: false,
+        reason: 'timestamp_unavailable',
+        details: {
+          toleranceSeconds: freshness.toleranceSeconds,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      reason: freshness.reason,
+    };
+  }
+
   parseEvent(req: Request): ParsedMetaWebhookEvent {
     const rawBody = Buffer.isBuffer(req.body) ? req.body : null;
     if (!rawBody) {
@@ -186,6 +232,15 @@ export class MetaWebhookProvider implements WebhookProvider {
       return res.sendStatus(400);
     }
 
+    const freshness = this.verifyFreshness(req);
+    if (!freshness.ok) {
+      console.warn('[Webhook Fortress] Meta webhook rejected by freshness policy', {
+        reason: freshness.reason,
+        ...freshness.details,
+      });
+      return res.sendStatus(401);
+    }
+
     try {
       await this.handler.handle(event);
       return res.sendStatus(200);
@@ -195,13 +250,48 @@ export class MetaWebhookProvider implements WebhookProvider {
   }
 
   private readSignatureHeader(req: Request): string | string[] | undefined {
-    const fromHeaders = coerceHeaderValue(req.headers['x-hub-signature-256']);
+    const fromHeaders = coerceHeaderValue(req.headers['x-hub-signature-256'] ?? req.headers['x-hub-signature']);
     if (fromHeaders) {
       return fromHeaders;
     }
+
     if (typeof req.header === 'function') {
-      return coerceHeaderValue(req.header('X-Hub-Signature-256'));
+      const fromSha256 = coerceHeaderValue(req.header('X-Hub-Signature-256'));
+      if (fromSha256) {
+        return fromSha256;
+      }
+
+      const fromLegacy = coerceHeaderValue(req.header('X-Hub-Signature'));
+      if (fromLegacy) {
+        return fromLegacy;
+      }
     }
+
+    return undefined;
+  }
+
+  private readTimestampHeader(req: Request): string | string[] | undefined {
+    const headerNames = [
+      'x-webhook-timestamp',
+      'x-hub-timestamp',
+      'x-request-timestamp',
+      'x-timestamp',
+    ] as const;
+
+    for (const headerName of headerNames) {
+      const fromHeaders = coerceHeaderValue(req.headers[headerName]);
+      if (fromHeaders) {
+        return fromHeaders;
+      }
+
+      if (typeof req.header === 'function') {
+        const fromHeaderFunction = coerceHeaderValue(req.header(headerName));
+        if (fromHeaderFunction) {
+          return fromHeaderFunction;
+        }
+      }
+    }
+
     return undefined;
   }
 

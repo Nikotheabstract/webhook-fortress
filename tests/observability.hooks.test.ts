@@ -2,13 +2,42 @@ import { createHmac } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { createWebhookFortress } from '../index.js';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const withFreshEntryTimestamp = (payload: unknown): unknown => {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+
+  const entries = Array.isArray(payload.entry) ? payload.entry : null;
+  if (!entries) {
+    return payload;
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1_000);
+  return {
+    ...payload,
+    entry: entries.map((entry) => {
+      if (!isRecord(entry) || typeof entry.time === 'number') {
+        return entry;
+      }
+
+      return {
+        ...entry,
+        time: nowSeconds,
+      };
+    }),
+  };
+};
+
 const sleep = async (ms: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
 
 const createSignedRequest = (payload: unknown, secret: string) => {
-  const raw = JSON.stringify(payload);
+  const raw = JSON.stringify(withFreshEntryTimestamp(payload));
   const signature = createHmac('sha256', secret).update(raw).digest('hex');
 
   return {
