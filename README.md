@@ -155,6 +155,27 @@ npm install webhook-fortress
 
 Webhook Fortress is **ESM-only** (`"type": "module"`).
 
+## Install via GitHub
+
+Install directly from the public GitHub repository:
+
+```bash
+npm install github:Nikotheabstract/webhook-fortress#v0.1.0
+```
+
+Requirements:
+
+- Node >=20
+- ESM environment
+- Webhook routes must use raw body middleware such as `express.raw({ type: "application/json" })`
+
+For stable installs, prefer version tags such as:
+
+- `v0.1.0`
+- `v0.1.1`
+
+That allows consumers to pin an explicit release instead of tracking the default branch.
+
 ## Documentation
 
 - [docs/architecture.md](./docs/architecture.md): module boundaries, lifecycle, and extension points.
