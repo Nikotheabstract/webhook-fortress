@@ -1,19 +1,6 @@
-import { createHmac } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { createWebhookFortress } from '../index.js';
-
-const createSignedRequest = (payload: unknown, secret: string) => {
-  const raw = JSON.stringify(payload);
-  const signature = createHmac('sha256', secret).update(raw).digest('hex');
-  return {
-    body: Buffer.from(raw, 'utf8'),
-    headers: {
-      'x-hub-signature-256': `sha256=${signature}`,
-    },
-    header: (name: string) =>
-      name.toLowerCase() === 'x-hub-signature-256' ? `sha256=${signature}` : undefined,
-  };
-};
+import { createSignedMetaRequest } from './utils/metaSignedRequest.js';
 
 describe('Webhook idempotency - concurrent duplicate delivery', () => {
   it('processes duplicate deliveries exactly once', async () => {
@@ -45,8 +32,8 @@ describe('Webhook idempotency - concurrent duplicate delivery', () => {
       ],
     };
 
-    const reqA = createSignedRequest(payload, 'meta-secret');
-    const reqB = createSignedRequest(payload, 'meta-secret');
+    const reqA = createSignedMetaRequest(payload, 'meta-secret');
+    const reqB = createSignedMetaRequest(payload, 'meta-secret');
     const resA = { sendStatus: vi.fn((code: number) => code) };
     const resB = { sendStatus: vi.fn((code: number) => code) };
 

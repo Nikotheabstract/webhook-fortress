@@ -3,9 +3,6 @@ import { ZodError } from 'zod';
 import type { WebhookEventHandler } from '../../handlers/WebhookEventHandler.js';
 import type { Request, Response, WebhookEvent } from '../../types.js';
 import type { WebhookFreshnessCheckResult, WebhookProvider } from '../WebhookProvider.js';
-import type {
-  MetaChannel,
-} from './metaEventParser.js';
 import { resolveChannel } from './metaEventParser.js';
 import type { WebhookSecretCandidate } from './metaSignature.js';
 import {
@@ -14,6 +11,7 @@ import {
   verifyWebhookSignature,
 } from './metaSignature.js';
 import type {
+  MetaChannel,
   MetaChange,
   MetaEntry,
   MetaMessagingEvent,

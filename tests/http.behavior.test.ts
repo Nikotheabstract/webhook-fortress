@@ -1,71 +1,6 @@
-import { createHmac } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { createWebhookFortress } from '../index.js';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-
-const withFreshEntryTimestamp = (payload: unknown): unknown => {
-  if (!isRecord(payload)) {
-    return payload;
-  }
-
-  const entries = Array.isArray(payload.entry) ? payload.entry : null;
-  if (!entries) {
-    return payload;
-  }
-
-  const nowSeconds = Math.floor(Date.now() / 1_000);
-  const normalizedEntries = entries.map((entry) => {
-    if (!isRecord(entry)) {
-      return entry;
-    }
-
-    if (typeof entry.time === 'number') {
-      return entry;
-    }
-
-    return {
-      ...entry,
-      time: nowSeconds,
-    };
-  });
-
-  return {
-    ...payload,
-    entry: normalizedEntries,
-  };
-};
-
-const signPayload = (payload: unknown, secret: string, options?: { preservePayloadTimestamp?: boolean }) => {
-  const normalizedPayload = options?.preservePayloadTimestamp ? payload : withFreshEntryTimestamp(payload);
-  const raw = JSON.stringify(normalizedPayload);
-  const signature = createHmac('sha256', secret).update(raw).digest('hex');
-
-  return {
-    raw,
-    signatureHeader: `sha256=${signature}`,
-  };
-};
-
-const createRequest = (
-  payload: unknown,
-  secret: string,
-  options?: { signatureOverride?: string; preservePayloadTimestamp?: boolean }
-) => {
-  const { raw, signatureHeader } = signPayload(payload, secret, {
-    preservePayloadTimestamp: options?.preservePayloadTimestamp,
-  });
-  const resolvedSignature = options?.signatureOverride ?? signatureHeader;
-
-  return {
-    body: Buffer.from(raw, 'utf8'),
-    headers: {
-      'x-hub-signature-256': resolvedSignature,
-    },
-    header: (name: string) => (name.toLowerCase() === 'x-hub-signature-256' ? resolvedSignature : undefined),
-  };
-};
+import { createSignedMetaRequest } from './utils/metaSignedRequest.js';
 
 const createResponse = () => ({
   sendStatus: vi.fn((statusCode: number) => statusCode),
@@ -80,7 +15,7 @@ describe('Webhook Fortress HTTP behavior', () => {
       handler,
     });
 
-    const req = createRequest(
+    const req = createSignedMetaRequest(
       {
         object: 'page',
         entry: [{ id: 'page-1', messaging: [{ message: { mid: 'mid.401' } }] }],
@@ -104,7 +39,7 @@ describe('Webhook Fortress HTTP behavior', () => {
       handler,
     });
 
-    const req = createRequest({ entry: [] }, 'meta-secret');
+    const req = createSignedMetaRequest({ entry: [] }, 'meta-secret');
     const res = createResponse();
 
     await webhook.handleRequest(req, res);
@@ -124,7 +59,7 @@ describe('Webhook Fortress HTTP behavior', () => {
       handler,
     });
 
-    const req = createRequest(
+    const req = createSignedMetaRequest(
       {
         object: 'page',
         entry: [
@@ -153,7 +88,7 @@ describe('Webhook Fortress HTTP behavior', () => {
     });
 
     const staleTimestampSeconds = Math.floor(Date.now() / 1_000) - 1_000;
-    const req = createRequest(
+    const req = createSignedMetaRequest(
       {
         object: 'page',
         entry: [
@@ -182,7 +117,7 @@ describe('Webhook Fortress HTTP behavior', () => {
       handler,
     });
 
-    const req = createRequest(
+    const req = createSignedMetaRequest(
       {
         object: 'page',
         entry: [{ id: 'page-1', messaging: [{ message: { mid: 'mid.no.timestamp.401' } }] }],

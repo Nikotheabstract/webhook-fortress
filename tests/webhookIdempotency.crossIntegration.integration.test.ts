@@ -1,19 +1,6 @@
-import { createHmac } from 'crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { createWebhookFortress } from '../index.js';
-
-const createSignedRequest = (payload: unknown, secret: string) => {
-  const raw = JSON.stringify(payload);
-  const signature = createHmac('sha256', secret).update(raw).digest('hex');
-  return {
-    body: Buffer.from(raw, 'utf8'),
-    headers: {
-      'x-hub-signature-256': `sha256=${signature}`,
-    },
-    header: (name: string) =>
-      name.toLowerCase() === 'x-hub-signature-256' ? `sha256=${signature}` : undefined,
-  };
-};
+import { createSignedMetaRequest } from './utils/metaSignedRequest.js';
 
 describe('Webhook idempotency - cross integration isolation', () => {
   it('treats different page/integration payloads as distinct events', async () => {
@@ -45,8 +32,8 @@ describe('Webhook idempotency - cross integration isolation', () => {
       ],
     });
 
-    const reqA = createSignedRequest(payloadFor('page-A'), 'meta-secret');
-    const reqB = createSignedRequest(payloadFor('page-B'), 'meta-secret');
+    const reqA = createSignedMetaRequest(payloadFor('page-A'), 'meta-secret');
+    const reqB = createSignedMetaRequest(payloadFor('page-B'), 'meta-secret');
     const resA = { sendStatus: vi.fn((code: number) => code) };
     const resB = { sendStatus: vi.fn((code: number) => code) };
 

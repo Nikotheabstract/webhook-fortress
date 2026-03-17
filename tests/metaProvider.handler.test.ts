@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MetaWebhookProvider } from '../src/providers/meta/MetaWebhookProvider.js';
-
-const sign = (body: string, secret: string) => {
-  const crypto = require('crypto') as typeof import('crypto');
-  return crypto.createHmac('sha256', secret).update(body).digest('hex');
-};
+import { createSignedMetaRequest } from './utils/metaSignedRequest.js';
 
 describe('MetaWebhookProvider', () => {
   it('delivers parsed event to handler', async () => {
@@ -34,16 +30,7 @@ describe('MetaWebhookProvider', () => {
       ],
     };
 
-    const raw = JSON.stringify(payload);
-    const signature = sign(raw, 'meta-secret');
-
-    const req = {
-      body: Buffer.from(raw, 'utf8'),
-      headers: {
-        'x-hub-signature-256': `sha256=${signature}`,
-      },
-      header: (name: string) => (name.toLowerCase() === 'x-hub-signature-256' ? `sha256=${signature}` : undefined),
-    };
+    const req = createSignedMetaRequest(payload, 'meta-secret');
 
     const res = {
       sendStatus: vi.fn((code: number) => code),
@@ -87,16 +74,9 @@ describe('MetaWebhookProvider', () => {
       ],
     };
 
-    const raw = JSON.stringify(payload);
-    const signature = sign(raw, 'meta-secret');
-
-    const req = {
-      body: Buffer.from(raw, 'utf8'),
-      headers: {
-        'x-hub-signature-256': `sha256=${signature}`,
-      },
-      header: (name: string) => (name.toLowerCase() === 'x-hub-signature-256' ? `sha256=${signature}` : undefined),
-    };
+    const req = createSignedMetaRequest(payload, 'meta-secret', {
+      preservePayloadTimestamp: true,
+    });
 
     const res = {
       sendStatus: vi.fn((code: number) => code),

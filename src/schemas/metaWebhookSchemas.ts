@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const MetaChannelSchema = z.enum(['messenger', 'instagram']);
+
 export const MetaReferralSchema = z
   .object({
     source: z.string().optional(),
@@ -148,6 +150,9 @@ export const MetaWebhookPayloadSchema = z.union([
 export type MetaWebhookChallengePayload = z.infer<typeof MetaWebhookChallengeSchema>;
 export type MetaWebhookNotificationPayload = z.infer<typeof MetaWebhookNotificationSchema>;
 export type MetaWebhookPayload = z.infer<typeof MetaWebhookPayloadSchema>;
+export type MetaChannel = z.infer<typeof MetaChannelSchema>;
+export type MetaReferral = z.infer<typeof MetaReferralSchema>;
+export type MetaMessage = z.infer<typeof MetaMessageSchema>;
 export type MetaEntry = z.infer<typeof MetaEntrySchema>;
 export type MetaMessagingEvent = z.infer<typeof MetaMessagingEventSchema>;
 export type MetaChange = z.infer<typeof MetaChangeSchema>;

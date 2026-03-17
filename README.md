@@ -2,7 +2,7 @@
 
 Webhook Fortress is a webhook ingestion engine focused on reliable and idempotent event processing.
 
-It demonstrates architecture patterns for safe webhook handling in Node.js systems.
+It was extracted from a larger private application to isolate reusable webhook reliability concerns into a standalone library.
 
 ## Why this project exists
 

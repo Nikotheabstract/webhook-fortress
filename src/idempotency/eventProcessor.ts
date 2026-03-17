@@ -1,4 +1,3 @@
-import { hasEventBeenProcessed, markEventAsProcessed } from './dedupe.js';
 import { type LockingOptions, withEventLock } from './locking.js';
 import type { WebhookStore } from '../stores/WebhookStore.js';
 import {
@@ -38,7 +37,7 @@ export class EventProcessor {
       throw new Error('eventId is required for idempotent processing');
     }
 
-    if (await hasEventBeenProcessed(this.store, normalizedEventId)) {
+    if (await this.store.hasProcessed(normalizedEventId)) {
       this.emitDuplicate(normalizedEventId);
       return { processed: false };
     }
@@ -48,14 +47,14 @@ export class EventProcessor {
         this.store,
         normalizedEventId,
         async () => {
-          if (await hasEventBeenProcessed(this.store, normalizedEventId)) {
+          if (await this.store.hasProcessed(normalizedEventId)) {
             this.emitDuplicate(normalizedEventId);
             return { processed: false };
           }
 
           try {
             await this.executeHandlerWithRetries(handler);
-            await markEventAsProcessed(this.store, normalizedEventId);
+            await this.store.markProcessed(normalizedEventId);
           } catch (error) {
             try {
               await this.store.recordFailure(normalizedEventId, error);
@@ -70,7 +69,7 @@ export class EventProcessor {
         this.options
       );
     } catch (error) {
-      if (await hasEventBeenProcessed(this.store, normalizedEventId)) {
+      if (await this.store.hasProcessed(normalizedEventId)) {
         this.emitDuplicate(normalizedEventId);
         return { processed: false };
       }
